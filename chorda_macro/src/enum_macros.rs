@@ -72,6 +72,9 @@ impl EnumRange {
             }
         };
 
+        let variants: Vec<_> = self.variants.all.iter().map(|(x, _)| &x.ident).collect();
+        let discriminants: Vec<_> = self.variants.all.iter().map(|(_, x)| x).collect();
+
         let as_repr_int_fn_name = {
             let name_str = format!("as_{}", repr_int.to_string());
             Ident::new(&name_str, repr_int.span())
@@ -82,12 +85,11 @@ impl EnumRange {
             /// Automatically derived from `EnumRange`
             #[inline]
             pub const fn #as_repr_int_fn_name(&self) -> #repr_int {
-                *self as #repr_int
+                match self {
+                    #( Self::#variants => #discriminants, )*
+                }
             }
         };
-
-        let variants = self.variants.all.iter().map(|(x, _)| &x.ident);
-        let discriminants = self.variants.all.iter().map(|(_, x)| x);
 
         let from_repr_int_fn_name = {
             let name_str = format!("from_{}", repr_int.to_string());
