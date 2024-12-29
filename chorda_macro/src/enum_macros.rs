@@ -1,8 +1,9 @@
 use proc_macro::TokenStream;
+use proc_macro2::Literal;
 use quote::quote;
 use syn::{
-    parse::Parse, punctuated::Punctuated, Attribute, Data, DeriveInput, Fields, Generics, Ident,
-    Meta, MetaList, Token, Variant,
+    parse::Parse, punctuated::Punctuated, Attribute, Data, DeriveInput, Expr, ExprLit, Fields,
+    Generics, Ident, Lit, Meta, MetaList, Token, Variant,
 };
 
 #[derive(Debug)]
@@ -19,7 +20,7 @@ impl Parse for EnumRange {
         let name = input.ident.clone();
         let generics = input.generics.clone();
         let attrs = parse_attributes(input.attrs)?;
-        let variants = parse_variants(input.data)?;
+        let variants = parse_variants(input.data, &attrs.repr_int)?;
         Ok(Self {
             name,
             generics,
@@ -76,12 +77,32 @@ impl EnumRange {
             Ident::new(&name_str, repr_int.span())
         };
         let as_repr_int_fn = quote! {
-            /// Return self as u8
+            /// Return self as its integer representation defined by `#[repr(..)]`
             ///
             /// Automatically derived from `EnumRange`
             #[inline]
             pub const fn #as_repr_int_fn_name(&self) -> #repr_int {
                 *self as #repr_int
+            }
+        };
+
+        let variants = self.variants.all.iter().map(|(x, _)| &x.ident);
+        let discriminants = self.variants.all.iter().map(|(_, x)| x);
+
+        let from_repr_int_fn_name = {
+            let name_str = format!("from_{}", repr_int.to_string());
+            Ident::new(&name_str, repr_int.span())
+        };
+        let from_repr_int_fn = quote! {
+            /// Make self from its integer representation defined by `#[repr(..)]`.
+            ///
+            /// Automatically derived from `EnumRange`
+            #[inline]
+            pub const fn #from_repr_int_fn_name(value: #repr_int) -> Option<Self> {
+                match value {
+                    #( #discriminants => Some(Self::#variants), )*
+                    _ => None
+                }
             }
         };
 
@@ -95,6 +116,7 @@ impl EnumRange {
                 #last_fn
                 #range_fn
                 #as_repr_int_fn
+                #from_repr_int_fn
             }
         }
     }
@@ -150,11 +172,11 @@ fn parse_attributes(attrs: Vec<Attribute>) -> syn::Result<Attributes> {
 pub struct Variants {
     first: Variant,
     last: Variant,
-    all: Vec<Variant>,
+    all: Vec<(Variant, Expr)>,
     ty: Option<()>,
 }
 
-fn parse_variants(data: Data) -> syn::Result<Variants> {
+fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
     let Data::Enum(data) = data else {
         panic!("EnumRange must be used only on enum");
     };
@@ -163,6 +185,7 @@ fn parse_variants(data: Data) -> syn::Result<Variants> {
     let mut first = None;
     let mut last = None;
     let mut vec = vec![];
+    let mut last_discriminant = None;
 
     for (idx, variant) in data.variants.into_iter().enumerate() {
         if idx == 0 {
@@ -175,7 +198,22 @@ fn parse_variants(data: Data) -> syn::Result<Variants> {
             panic!("EnumRange can only be applied on enum with only unit variants");
         };
 
-        vec.push(variant);
+        let discriminant = if let Some((_, expr)) = &variant.discriminant {
+            if let Expr::Lit(ExprLit {
+                lit: Lit::Int(val), ..
+            }) = expr
+            {
+                last_discriminant = Some(val.base10_parse::<i64>()?);
+                expr.clone()
+            } else {
+                unreachable!("expected discriminant is of integer type")
+            }
+        } else {
+            last_discriminant = last_discriminant.map_or(Some(0), |x| Some(x + 1));
+            new_syn_int_literal(repr_int, last_discriminant.unwrap())
+        };
+
+        vec.push((variant, discriminant));
     }
 
     Ok(Variants {
@@ -201,4 +239,27 @@ fn ident_is_integer_type(ident: &Ident) -> bool {
             | "usize"
             | "isize"
     )
+}
+
+fn new_syn_int_literal(int_ident: &Ident, val: i64) -> Expr {
+    assert!(ident_is_integer_type(int_ident));
+    let token = match int_ident.to_string().as_str() {
+        "u8" => Literal::u8_unsuffixed(val as u8),
+        "u16" => Literal::u16_unsuffixed(val as u16),
+        "u32" => Literal::u32_unsuffixed(val as u32),
+        "u64" => Literal::u64_unsuffixed(val as u64),
+        "u128" => Literal::u128_unsuffixed(val as u128),
+        "i8" => Literal::i8_unsuffixed(val as i8),
+        "i16" => Literal::i16_unsuffixed(val as i16),
+        "i32" => Literal::i32_unsuffixed(val as i32),
+        "i64" => Literal::i64_unsuffixed(val as i64),
+        "i128" => Literal::i128_unsuffixed(val as i128),
+        "usize" => Literal::usize_unsuffixed(val as usize),
+        "isize" => Literal::isize_unsuffixed(val as isize),
+        _ => unreachable!("not an integer type"),
+    };
+    Expr::Lit(ExprLit {
+        attrs: vec![],
+        lit: Lit::new(token),
+    })
 }
