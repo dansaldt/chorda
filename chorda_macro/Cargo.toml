@@ -1,0 +1,12 @@
+[package]
+name = "chorda_macro"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { version = "1.0.74", features = ["proc-macro"] }
+quote = { version = "1.0.35", features = ["proc-macro"] }
+syn = { version = "2.0.46", features = ["derive", "extra-traits", "proc-macro", "parsing", "printing"] }

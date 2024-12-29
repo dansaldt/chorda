@@ -1,0 +1,13 @@
+[workspace]
+members = [
+  "chorda",
+  "chorda_macro",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# local crates
+chorda = { path = "./chorda" }
+chorda_macro = { path = "./chorda_macro" }
+
+
