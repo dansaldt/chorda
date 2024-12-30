@@ -186,7 +186,7 @@ fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
     let variants_len = data.variants.len();
     let mut first = None;
     let mut last = None;
-    let mut vec = vec![];
+    let mut all = vec![];
     let mut last_discriminant = None;
 
     for (idx, variant) in data.variants.into_iter().enumerate() {
@@ -216,13 +216,13 @@ fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
             new_syn_int_literal(repr_int, last_discriminant.unwrap())
         };
 
-        vec.push((variant, discriminant));
+        all.push((variant, discriminant));
     }
 
     Ok(Variants {
         first: first.unwrap_or_else(|| unreachable!("first variant must exist")),
         last: last.unwrap_or_else(|| unreachable!("last variant must exist")),
-        all: vec,
+        all,
         ty: None,
     })
 }
