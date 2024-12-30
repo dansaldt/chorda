@@ -9,5 +9,3 @@ resolver = "2"
 # local crates
 chorda = { path = "./chorda" }
 chorda_macro = { path = "./chorda_macro" }
-
-
