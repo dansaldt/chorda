@@ -192,7 +192,8 @@ fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
     for (idx, variant) in data.variants.into_iter().enumerate() {
         if idx == 0 {
             first = Some(variant.clone());
-        } else if idx == variants_len - 1 {
+        }
+        if idx == variants_len - 1 {
             last = Some(variant.clone());
         }
 
