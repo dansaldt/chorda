@@ -1,9 +1,9 @@
 use proc_macro::TokenStream;
 use proc_macro2::Literal;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{
     parse::Parse, punctuated::Punctuated, Attribute, Data, DeriveInput, Expr, ExprLit, Fields,
-    Generics, Ident, Lit, Meta, MetaList, Token, Variant,
+    FieldsUnnamed, Generics, Ident, Lit, Meta, MetaList, Token, Variant,
 };
 
 #[derive(Debug)]
@@ -60,20 +60,50 @@ impl EnumRange {
             }
         };
 
+        let as_method = format_ident!("as_{}", repr_int);
         let range_fn = quote! {
             /// Return range of the enum variants as #range_ty
             ///
             /// Automatically derived from `EnumRange`
             #[inline]
             pub const fn range() -> std::ops::RangeInclusive< #repr_int > {
-                let __first = (Self::#first) as #repr_int;
-                let __last = (Self::#last) as #repr_int;
+                let __first = Self::#first.#as_method();
+                let __last = Self::#last.#as_method();
                 __first..=__last
             }
         };
 
-        let variants: Vec<_> = self.variants.all.iter().map(|(x, _)| &x.ident).collect();
-        let discriminants: Vec<_> = self.variants.all.iter().map(|(_, x)| x).collect();
+        let mut variants_as_repr = Vec::new();
+        let mut variants_from_repr = Vec::new();
+        let mut discriminants = Vec::new();
+        self.variants.all.iter().for_each(|(variant, expr)| {
+            let ident = &variant.ident;
+            match &variant.fields {
+                Fields::Named(fields) => {
+                    variants_as_repr.push(quote! { #ident { .. } });
+
+                    let fields_ident: Vec<_> =
+                        fields.named.iter().map(|f| f.ident.as_ref()).collect();
+                    variants_from_repr
+                        .push(quote! { #ident { #( #fields_ident: Default::default(), )* } });
+                }
+                Fields::Unnamed(fields @ FieldsUnnamed { .. }) => {
+                    variants_as_repr.push(quote! { #ident( .. ) });
+
+                    let default: Vec<_> = fields
+                        .unnamed
+                        .iter()
+                        .map(|_| quote! { Default::default() })
+                        .collect();
+                    variants_from_repr.push(quote! { #ident ( #( #default , )* ) });
+                }
+                Fields::Unit => {
+                    variants_as_repr.push(quote! { #ident });
+                    variants_from_repr.push(quote! { #ident });
+                }
+            };
+            discriminants.push(expr);
+        });
 
         let as_repr_int_fn_name = {
             let name_str = format!("as_{}", repr_int.to_string());
@@ -86,9 +116,15 @@ impl EnumRange {
             #[inline]
             pub const fn #as_repr_int_fn_name(&self) -> #repr_int {
                 match self {
-                    #( Self::#variants => #discriminants, )*
+                    #( Self::#variants_as_repr => #discriminants, )*
                 }
             }
+        };
+
+        let const_kw = if self.variants.only_unit_variants {
+            quote! { const }
+        } else {
+            quote! {}
         };
 
         let from_repr_int_fn_name = {
@@ -100,9 +136,9 @@ impl EnumRange {
             ///
             /// Automatically derived from `EnumRange`
             #[inline]
-            pub const fn #from_repr_int_fn_name(value: #repr_int) -> Option<Self> {
+            pub #const_kw fn #from_repr_int_fn_name(value: #repr_int) -> Option<Self> {
                 match value {
-                    #( #discriminants => Some(Self::#variants), )*
+                    #( #discriminants => Some(Self::#variants_from_repr), )*
                     _ => None
                 }
             }
@@ -175,6 +211,7 @@ pub struct Variants {
     first: Variant,
     last: Variant,
     all: Vec<(Variant, Expr)>,
+    only_unit_variants: bool,
     ty: Option<()>,
 }
 
@@ -188,6 +225,7 @@ fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
     let mut last = None;
     let mut all = vec![];
     let mut last_discriminant = None;
+    let mut only_unit_variants = true;
 
     for (idx, variant) in data.variants.into_iter().enumerate() {
         if idx == 0 {
@@ -197,8 +235,9 @@ fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
             last = Some(variant.clone());
         }
 
-        if !matches!(variant.fields, Fields::Unit) {
-            panic!("EnumRange can only be applied on enum with only unit variants");
+        match &variant.fields {
+            Fields::Named(_) | Fields::Unnamed(_) => only_unit_variants = false,
+            Fields::Unit => (),
         };
 
         let discriminant = if let Some((_, expr)) = &variant.discriminant {
@@ -223,6 +262,7 @@ fn parse_variants(data: Data, repr_int: &Ident) -> syn::Result<Variants> {
         first: first.unwrap_or_else(|| unreachable!("first variant must exist")),
         last: last.unwrap_or_else(|| unreachable!("last variant must exist")),
         all,
+        only_unit_variants,
         ty: None,
     })
 }
